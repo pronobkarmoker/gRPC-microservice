@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # gRPC Server
+  grpc-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: grpc-user-server
+    ports:
+      - "50051:50051"
+    environment:
+      - NODE_ENV=production
+      - GRPC_HOST=0.0.0.0
+      - GRPC_PORT=50051
+    volumes:
+      - ./server/proto:/app/proto:ro
+    networks:
+      - grpc-network
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Proxy Server
+  proxy-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.proxy
+    container_name: grpc-proxy-server
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - PROXY_HOST=0.0.0.0
+      - PROXY_PORT=8080
+      - GRPC_SERVER_URL=grpc-server:50051
+    depends_on:
+      grpc-server:
+        condition: service_healthy
+    volumes:
+      - ./server/proto:/app/proto:ro
+    networks:
+      - grpc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # React Client
+  react-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: grpc-react-client
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080
+      - NODE_ENV=production
+    depends_on:
+      proxy-server:
+        condition: service_healthy
+    networks:
+      - grpc-network
+    restart: unless-stopped
+
+networks:
+  grpc-network:
+    driver: bridge
+    name: grpc-microservice-network
+
+volumes:
+  node_modules_server:
+  node_modules_client:
